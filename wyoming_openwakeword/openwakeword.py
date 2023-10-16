@@ -48,6 +48,7 @@ def mels_proc(state: State):
                 break
 
             while True:
+                _LOGGER.debug("openwakeword 51")
                 # only attempt to lock if locks are free
                 if not state.clients_lock.locked() and not state.audio_lock.locked():
                     with state.clients_lock, state.audio_lock:
@@ -119,6 +120,7 @@ def mels_proc(state: State):
 
                     state.mels_ready.release()
                 else:
+                    _LOGGER.debug("openwakeword 123")
                     with state.clients_lock:
                         pass
                     with state.audio_lock:
@@ -152,6 +154,7 @@ def embeddings_proc(state: State):
                 break
 
             while True:
+                _LOGGER.debug("openwakeword 156")
                 # only attempt to lock if locks are free
                 if not state.clients_lock.locked() and not state.mels_lock.locked():
                     with state.clients_lock, state.mels_lock:
@@ -230,6 +233,7 @@ def embeddings_proc(state: State):
 
                         ww_state.embeddings_ready.release()
                 else:
+                    _LOGGER.debug("openwakeword 236")
                     with state.clients_lock:
                         pass
                     with state.mels_lock:
@@ -269,6 +273,7 @@ def ww_proc(
                 break
 
             while True:
+                _LOGGER.debug("openwakeword 272")
                 # only attempt to lock if locks are free
                 if not state.clients_lock.locked() and not state.audio_lock.locked():
                     with state.clients_lock, ww_state.embeddings_lock:
@@ -392,6 +397,7 @@ def ww_proc(
                     for coro in coros:
                         asyncio.run_coroutine_threadsafe(coro, loop)
                 else:
+                    _LOGGER.debug("openwakeword 396")
                     with state.clients_lock:
                         pass
                     with state.audio_lock:
