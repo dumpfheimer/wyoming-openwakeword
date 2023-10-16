@@ -1,4 +1,5 @@
 import asyncio
+import time
 import logging
 from datetime import datetime
 from typing import List, Optional, TextIO
@@ -60,6 +61,7 @@ def mels_proc(state: State):
                         batch_size = len(todo_ids)
                         if batch_size < 1:
                             # Not enough audio to process
+                            time.sleep(0.1)
                             break
 
                         audio_tensor = np.zeros(
@@ -163,6 +165,7 @@ def embeddings_proc(state: State):
                         batch_size = len(todo_ids)
                         if batch_size < 1:
                             # Not enough audio to process
+                            time.sleep(0.1)
                             break
 
                         mels_tensor = np.zeros(
@@ -279,6 +282,7 @@ def ww_proc(
                         batch_size = len(todo_ids)
                         if batch_size < 1:
                             # Not enough audio to process
+                            time.sleep(0.1)
                             break
 
                         embeddings_tensor = np.zeros(
