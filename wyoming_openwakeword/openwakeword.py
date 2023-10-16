@@ -61,6 +61,8 @@ def mels_proc(state: State):
                         batch_size = len(todo_ids)
                         if batch_size < 1:
                             # Not enough audio to process
+                            state.clients_lock.release()
+                            state.audio_lock.release()
                             time.sleep(0.1)
                             break
 
@@ -165,6 +167,8 @@ def embeddings_proc(state: State):
                         batch_size = len(todo_ids)
                         if batch_size < 1:
                             # Not enough audio to process
+                            state.clients_lock.release()
+                            state.mels_lock.release()
                             time.sleep(0.1)
                             break
 
@@ -282,6 +286,8 @@ def ww_proc(
                         batch_size = len(todo_ids)
                         if batch_size < 1:
                             # Not enough audio to process
+                            state.clients_lock.release()
+                            state.audio_lock.release()
                             time.sleep(0.1)
                             break
 
