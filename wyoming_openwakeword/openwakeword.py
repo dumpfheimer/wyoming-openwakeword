@@ -48,73 +48,80 @@ def mels_proc(state: State):
                 break
 
             while True:
-                with state.clients_lock, state.audio_lock:
-                    # Collect batch
-                    todo_ids = [
-                        client_id
-                        for client_id, client in state.clients.items()
-                        if client.new_audio_samples >= MEL_SAMPLES
-                    ]
-                    batch_size = len(todo_ids)
-                    if batch_size < 1:
-                        # Not enough audio to process
-                        break
-
-                    audio_tensor = np.zeros(
-                        shape=(batch_size, MEL_SAMPLES), dtype=np.float32
-                    )
-
-                    todo_timestamps: List[int] = []
-                    for i, client_id in enumerate(todo_ids):
-                        client = state.clients[client_id]
-                        audio_tensor[i, :] = client.audio[
-                            -client.new_audio_samples : len(client.audio)
-                            - client.new_audio_samples
-                            + MEL_SAMPLES
+                # only attempt to lock if locks are free
+                if not state.clients_lock.locked() and not state.audio_lock.locked():
+                    with state.clients_lock, state.audio_lock:
+                        # Collect batch
+                        todo_ids = [
+                            client_id
+                            for client_id, client in state.clients.items()
+                            if client.new_audio_samples >= MEL_SAMPLES
                         ]
-                        client.new_audio_samples = max(
-                            0, client.new_audio_samples - SAMPLES_PER_CHUNK
-                        )
-                        todo_timestamps.append(client.audio_timestamp)
+                        batch_size = len(todo_ids)
+                        if batch_size < 1:
+                            # Not enough audio to process
+                            break
 
-                        # Shift timestamp
-                        client.audio_timestamp += MS_PER_CHUNK
-
-                melspec_model.resize_tensor_input(
-                    melspec_input_index,
-                    audio_tensor.shape,
-                    strict=True,
-                )
-                melspec_model.allocate_tensors()
-
-                # Generate mels
-                melspec_model.set_tensor(melspec_input_index, audio_tensor)
-                melspec_model.invoke()
-                mels = melspec_model.get_tensor(melspec_output_index)
-                mels = (mels / 10) + 2  # transform to fit embedding
-
-                num_mel_windows = mels.shape[2]
-                with state.clients_lock, state.mels_lock:
-                    # Add to client mels
-                    for i, client_id in enumerate(todo_ids):
-                        client = state.clients.get(client_id)
-                        if client is None:
-                            # Client disconnected
-                            continue
-
-                        # Shift
-                        client.mels[:-num_mel_windows] = client.mels[num_mel_windows:]
-
-                        # Overwrite
-                        client.mels[-num_mel_windows:] = mels[i, 0, :, :]
-                        client.new_mels = min(
-                            len(client.mels), client.new_mels + num_mel_windows
+                        audio_tensor = np.zeros(
+                            shape=(batch_size, MEL_SAMPLES), dtype=np.float32
                         )
 
-                        # Update timestamp
-                        client.mels_timestamp = todo_timestamps[i]
+                        todo_timestamps: List[int] = []
+                        for i, client_id in enumerate(todo_ids):
+                            client = state.clients[client_id]
+                            audio_tensor[i, :] = client.audio[
+                                -client.new_audio_samples : len(client.audio)
+                                - client.new_audio_samples
+                                + MEL_SAMPLES
+                            ]
+                            client.new_audio_samples = max(
+                                0, client.new_audio_samples - SAMPLES_PER_CHUNK
+                            )
+                            todo_timestamps.append(client.audio_timestamp)
 
-                state.mels_ready.release()
+                            # Shift timestamp
+                            client.audio_timestamp += MS_PER_CHUNK
+
+                    melspec_model.resize_tensor_input(
+                        melspec_input_index,
+                        audio_tensor.shape,
+                        strict=True,
+                    )
+                    melspec_model.allocate_tensors()
+
+                    # Generate mels
+                    melspec_model.set_tensor(melspec_input_index, audio_tensor)
+                    melspec_model.invoke()
+                    mels = melspec_model.get_tensor(melspec_output_index)
+                    mels = (mels / 10) + 2  # transform to fit embedding
+
+                    num_mel_windows = mels.shape[2]
+                    with state.clients_lock, state.mels_lock:
+                        # Add to client mels
+                        for i, client_id in enumerate(todo_ids):
+                            client = state.clients.get(client_id)
+                            if client is None:
+                                # Client disconnected
+                                continue
+
+                            # Shift
+                            client.mels[:-num_mel_windows] = client.mels[num_mel_windows:]
+
+                            # Overwrite
+                            client.mels[-num_mel_windows:] = mels[i, 0, :, :]
+                            client.new_mels = min(
+                                len(client.mels), client.new_mels + num_mel_windows
+                            )
+
+                            # Update timestamp
+                            client.mels_timestamp = todo_timestamps[i]
+
+                    state.mels_ready.release()
+                else:
+                    with state.clients_lock:
+                        pass
+                    with state.audio_lock:
+                        pass
 
     except Exception:
         _LOGGER.exception("Unexpected error in mels thread")
@@ -144,80 +151,87 @@ def embeddings_proc(state: State):
                 break
 
             while True:
-                with state.clients_lock, state.mels_lock:
-                    # Collect batch
-                    todo_ids = [
-                        client_id
-                        for client_id, client in state.clients.items()
-                        if client.new_mels >= EMB_FEATURES
-                    ]
-                    batch_size = len(todo_ids)
-                    if batch_size < 1:
-                        # Not enough audio to process
-                        break
-
-                    mels_tensor = np.zeros(
-                        shape=(batch_size, EMB_FEATURES, NUM_MELS, 1),
-                        dtype=np.float32,
-                    )
-
-                    todo_timestamps: List[int] = []
-                    for i, client_id in enumerate(todo_ids):
-                        client = state.clients[client_id]
-                        mels_tensor[i, :, :, 0] = client.mels[
-                            -client.new_mels : len(client.mels)
-                            - client.new_mels
-                            + EMB_FEATURES,
-                            :,
+                # only attempt to lock if locks are free
+                if not state.clients_lock.locked() and not state.mels_lock.locked():
+                    with state.clients_lock, state.mels_lock:
+                        # Collect batch
+                        todo_ids = [
+                            client_id
+                            for client_id, client in state.clients.items()
+                            if client.new_mels >= EMB_FEATURES
                         ]
-                        client.new_mels = max(0, client.new_mels - EMB_STEP)
-                        todo_timestamps.append(client.mels_timestamp)
+                        batch_size = len(todo_ids)
+                        if batch_size < 1:
+                            # Not enough audio to process
+                            break
 
-                        # Shift timestamp
-                        client.mels_timestamp += MS_PER_CHUNK
+                        mels_tensor = np.zeros(
+                            shape=(batch_size, EMB_FEATURES, NUM_MELS, 1),
+                            dtype=np.float32,
+                        )
 
-                embedding_model.resize_tensor_input(
-                    embedding_input_index,
-                    mels_tensor.shape,
-                    strict=True,
-                )
-                embedding_model.allocate_tensors()
-
-                # Generate embeddings
-                embedding_model.set_tensor(embedding_input_index, mels_tensor)
-                embedding_model.invoke()
-
-                embeddings = embedding_model.get_tensor(embedding_output_index)
-
-                num_embedding_windows = embeddings.shape[2]
-                for ww_name, ww_state in state.wake_words.items():
-                    with state.clients_lock, ww_state.embeddings_lock:
-                        # Add to wake word model embeddings
+                        todo_timestamps: List[int] = []
                         for i, client_id in enumerate(todo_ids):
-                            client = state.clients.get(client_id)
-                            if client is None:
-                                # Client disconnected
-                                continue
+                            client = state.clients[client_id]
+                            mels_tensor[i, :, :, 0] = client.mels[
+                                -client.new_mels : len(client.mels)
+                                - client.new_mels
+                                + EMB_FEATURES,
+                                :,
+                            ]
+                            client.new_mels = max(0, client.new_mels - EMB_STEP)
+                            todo_timestamps.append(client.mels_timestamp)
 
-                            # Shift
-                            client_data = client.wake_words[ww_name]
-                            client_data.embeddings[
-                                :-num_embedding_windows
-                            ] = client_data.embeddings[num_embedding_windows:]
+                            # Shift timestamp
+                            client.mels_timestamp += MS_PER_CHUNK
 
-                            # Overwrite
-                            client_data.embeddings[
-                                -num_embedding_windows:
-                            ] = embeddings[i, 0, :, :]
-                            client_data.new_embeddings = min(
-                                len(client_data.embeddings),
-                                client_data.new_embeddings + num_embedding_windows,
-                            )
+                    embedding_model.resize_tensor_input(
+                        embedding_input_index,
+                        mels_tensor.shape,
+                        strict=True,
+                    )
+                    embedding_model.allocate_tensors()
 
-                            # Update timestamp
-                            client_data.embeddings_timestamp = todo_timestamps[i]
+                    # Generate embeddings
+                    embedding_model.set_tensor(embedding_input_index, mels_tensor)
+                    embedding_model.invoke()
 
-                    ww_state.embeddings_ready.release()
+                    embeddings = embedding_model.get_tensor(embedding_output_index)
+
+                    num_embedding_windows = embeddings.shape[2]
+                    for ww_name, ww_state in state.wake_words.items():
+                        with state.clients_lock, ww_state.embeddings_lock:
+                            # Add to wake word model embeddings
+                            for i, client_id in enumerate(todo_ids):
+                                client = state.clients.get(client_id)
+                                if client is None:
+                                    # Client disconnected
+                                    continue
+
+                                # Shift
+                                client_data = client.wake_words[ww_name]
+                                client_data.embeddings[
+                                    :-num_embedding_windows
+                                ] = client_data.embeddings[num_embedding_windows:]
+
+                                # Overwrite
+                                client_data.embeddings[
+                                    -num_embedding_windows:
+                                ] = embeddings[i, 0, :, :]
+                                client_data.new_embeddings = min(
+                                    len(client_data.embeddings),
+                                    client_data.new_embeddings + num_embedding_windows,
+                                )
+
+                                # Update timestamp
+                                client_data.embeddings_timestamp = todo_timestamps[i]
+
+                        ww_state.embeddings_ready.release()
+                else:
+                    with state.clients_lock:
+                        pass
+                    with state.mels_lock:
+                        pass
 
     except Exception:
         _LOGGER.exception("Unexpected error in embeddings thread")
@@ -253,125 +267,132 @@ def ww_proc(
                 break
 
             while True:
-                with state.clients_lock, ww_state.embeddings_lock:
-                    # Collect batch
-                    todo_ids = [
-                        client_id
-                        for client_id, client in state.clients.items()
-                        if client.wake_words[ww_model_key].new_embeddings >= ww_windows
-                    ]
-                    batch_size = len(todo_ids)
-                    if batch_size < 1:
-                        # Not enough audio to process
-                        break
-
-                    embeddings_tensor = np.zeros(
-                        shape=(batch_size, ww_windows, WW_FEATURES),
-                        dtype=np.float32,
-                    )
-
-                    todo_timestamps: List[int] = []
-                    for i, client_id in enumerate(todo_ids):
-                        client = state.clients[client_id]
-                        client_data = client.wake_words[ww_model_key]
-                        embeddings_tensor[i, :] = client_data.embeddings[
-                            -client_data.new_embeddings : len(client_data.embeddings)
-                            - client_data.new_embeddings
-                            + ww_windows
+                # only attempt to lock if locks are free
+                if not state.clients_lock.locked() and not state.audio_lock.locked():
+                    with state.clients_lock, ww_state.embeddings_lock:
+                        # Collect batch
+                        todo_ids = [
+                            client_id
+                            for client_id, client in state.clients.items()
+                            if client.wake_words[ww_model_key].new_embeddings >= ww_windows
                         ]
-                        client_data.new_embeddings = max(
-                            0, client_data.new_embeddings - 1
+                        batch_size = len(todo_ids)
+                        if batch_size < 1:
+                            # Not enough audio to process
+                            break
+
+                        embeddings_tensor = np.zeros(
+                            shape=(batch_size, ww_windows, WW_FEATURES),
+                            dtype=np.float32,
                         )
-                        todo_timestamps.append(client_data.embeddings_timestamp)
 
-                        # Shift timestamp
-                        client_data.embeddings_timestamp += MS_PER_CHUNK
-
-                ww_model.resize_tensor_input(
-                    ww_input_index,
-                    embeddings_tensor.shape,
-                    strict=False,  # must be False for non-dynamic batch dim
-                )
-                ww_model.allocate_tensors()
-
-                # Generate probabilities
-                ww_model.set_tensor(ww_input_index, embeddings_tensor)
-                ww_model.invoke()
-                probabilities = ww_model.get_tensor(ww_output_index)
-
-                coros = []
-                with state.clients_lock:
-                    for i, probability in enumerate(probabilities):
-                        client_id = todo_ids[i]
-                        client = state.clients.get(client_id)
-                        if client is None:
-                            # Client disconnected
-                            continue
-
-                        if state.debug_probability:
-                            _LOGGER.debug(
-                                "client=%s, wake_word=%s, probability=%s",
-                                client_id,
-                                ww_model_key,
-                                probability.item(),
+                        todo_timestamps: List[int] = []
+                        for i, client_id in enumerate(todo_ids):
+                            client = state.clients[client_id]
+                            client_data = client.wake_words[ww_model_key]
+                            embeddings_tensor[i, :] = client_data.embeddings[
+                                -client_data.new_embeddings : len(client_data.embeddings)
+                                - client_data.new_embeddings
+                                + ww_windows
+                            ]
+                            client_data.new_embeddings = max(
+                                0, client_data.new_embeddings - 1
                             )
+                            todo_timestamps.append(client_data.embeddings_timestamp)
 
-                        prob_file: Optional[TextIO] = None
-                        if (state.output_dir is not None) and state.debug_probability:
-                            # Output chunk probabilities and detections for debugging
-                            prob_file = open(
-                                state.output_dir / f"{client_id}.txt",
-                                "a",
-                                encoding="utf-8",
-                            )
-                            print(
-                                _timestamp(),
-                                ww_model_key,
-                                probability.item(),
-                                file=prob_file,
-                            )
+                            # Shift timestamp
+                            client_data.embeddings_timestamp += MS_PER_CHUNK
 
-                        client_data = client.wake_words[ww_model_key]
-                        if probability.item() >= client_data.threshold:
-                            # Increase activation
-                            client_data.activations += 1
+                    ww_model.resize_tensor_input(
+                        ww_input_index,
+                        embeddings_tensor.shape,
+                        strict=False,  # must be False for non-dynamic batch dim
+                    )
+                    ww_model.allocate_tensors()
 
-                            if client_data.activations >= client_data.trigger_level:
-                                client_data.is_detected = True
-                                client_data.activations = 0
-                                coros.append(
-                                    client.event_handler.write_event(
-                                        Detection(
-                                            name=ww_model_key,
-                                            timestamp=todo_timestamps[i],
-                                        ).event()
-                                    ),
-                                )
+                    # Generate probabilities
+                    ww_model.set_tensor(ww_input_index, embeddings_tensor)
+                    ww_model.invoke()
+                    probabilities = ww_model.get_tensor(ww_output_index)
+
+                    coros = []
+                    with state.clients_lock:
+                        for i, probability in enumerate(probabilities):
+                            client_id = todo_ids[i]
+                            client = state.clients.get(client_id)
+                            if client is None:
+                                # Client disconnected
+                                continue
+
+                            if state.debug_probability:
                                 _LOGGER.debug(
-                                    "Triggered %s (client=%s)", ww_model_key, client_id
+                                    "client=%s, wake_word=%s, probability=%s",
+                                    client_id,
+                                    ww_model_key,
+                                    probability.item(),
                                 )
 
-                                if prob_file is not None:
-                                    print(
-                                        _timestamp(),
-                                        ww_model_key,
-                                        "detected",
-                                        file=prob_file,
+                            prob_file: Optional[TextIO] = None
+                            if (state.output_dir is not None) and state.debug_probability:
+                                # Output chunk probabilities and detections for debugging
+                                prob_file = open(
+                                    state.output_dir / f"{client_id}.txt",
+                                    "a",
+                                    encoding="utf-8",
+                                )
+                                print(
+                                    _timestamp(),
+                                    ww_model_key,
+                                    probability.item(),
+                                    file=prob_file,
+                                )
+
+                            client_data = client.wake_words[ww_model_key]
+                            if probability.item() >= client_data.threshold:
+                                # Increase activation
+                                client_data.activations += 1
+
+                                if client_data.activations >= client_data.trigger_level:
+                                    client_data.is_detected = True
+                                    client_data.activations = 0
+                                    coros.append(
+                                        client.event_handler.write_event(
+                                            Detection(
+                                                name=ww_model_key,
+                                                timestamp=todo_timestamps[i],
+                                            ).event()
+                                        ),
                                     )
-                        else:
-                            # Down towards 0
-                            client_data.activations = max(
-                                0, client_data.activations - 1
-                            )
+                                    _LOGGER.debug(
+                                        "Triggered %s (client=%s)", ww_model_key, client_id
+                                    )
 
-                        # Clean up
-                        if prob_file is not None:
-                            prob_file.close()
-                            prob_file = None
+                                    if prob_file is not None:
+                                        print(
+                                            _timestamp(),
+                                            ww_model_key,
+                                            "detected",
+                                            file=prob_file,
+                                        )
+                            else:
+                                # Down towards 0
+                                client_data.activations = max(
+                                    0, client_data.activations - 1
+                                )
 
-                # Run outside lock just to be safe
-                for coro in coros:
-                    asyncio.run_coroutine_threadsafe(coro, loop)
+                            # Clean up
+                            if prob_file is not None:
+                                prob_file.close()
+                                prob_file = None
+
+                    # Run outside lock just to be safe
+                    for coro in coros:
+                        asyncio.run_coroutine_threadsafe(coro, loop)
+                else:
+                    with state.clients_lock:
+                        pass
+                    with state.audio_lock:
+                        pass
 
     except Exception:
         _LOGGER.exception("Unexpected error in wake word thread")
