@@ -1,5 +1,4 @@
 import asyncio
-import time
 import logging
 from datetime import datetime
 from typing import List, Optional, TextIO
@@ -47,7 +46,6 @@ def mels_proc(state: State):
             state.audio_ready.acquire()
             if not state.is_running:
                 break
-            noop = False
 
             while True:
                 # only attempt to lock if locks are free
@@ -62,7 +60,6 @@ def mels_proc(state: State):
                         batch_size = len(todo_ids)
                         if batch_size < 1:
                             # Not enough audio to process
-                            noop = True
                             break
 
                         audio_tensor = np.zeros(
@@ -120,8 +117,11 @@ def mels_proc(state: State):
                             client.mels_timestamp = todo_timestamps[i]
 
                     state.mels_ready.release()
-            if noop:
-                time.sleep(0.1)
+                else:
+                    with state.clients_lock:
+                        pass
+                    with state.audio_lock:
+                        pass
 
     except Exception:
         _LOGGER.exception("Unexpected error in mels thread")
@@ -149,7 +149,6 @@ def embeddings_proc(state: State):
             state.mels_ready.acquire()
             if not state.is_running:
                 break
-            noop = False
 
             while True:
                 # only attempt to lock if locks are free
@@ -164,7 +163,6 @@ def embeddings_proc(state: State):
                         batch_size = len(todo_ids)
                         if batch_size < 1:
                             # Not enough audio to process
-                            noop = True
                             break
 
                         mels_tensor = np.zeros(
@@ -229,8 +227,11 @@ def embeddings_proc(state: State):
                                 client_data.embeddings_timestamp = todo_timestamps[i]
 
                         ww_state.embeddings_ready.release()
-            if noop:
-                time.sleep(0.1)
+                else:
+                    with state.clients_lock:
+                        pass
+                    with state.mels_lock:
+                        pass
 
     except Exception:
         _LOGGER.exception("Unexpected error in embeddings thread")
@@ -264,7 +265,6 @@ def ww_proc(
             ww_state.embeddings_ready.acquire()
             if not state.is_running:
                 break
-            noop = False
 
             while True:
                 # only attempt to lock if locks are free
@@ -279,7 +279,6 @@ def ww_proc(
                         batch_size = len(todo_ids)
                         if batch_size < 1:
                             # Not enough audio to process
-                            noop = True
                             break
 
                         embeddings_tensor = np.zeros(
@@ -389,8 +388,11 @@ def ww_proc(
                     # Run outside lock just to be safe
                     for coro in coros:
                         asyncio.run_coroutine_threadsafe(coro, loop)
-            if noop:
-                time.sleep(0.1)
+                else:
+                    with state.clients_lock:
+                        pass
+                    with state.audio_lock:
+                        pass
 
     except Exception:
         _LOGGER.exception("Unexpected error in wake word thread")
