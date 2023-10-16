@@ -44,6 +44,7 @@ def mels_proc(state: State):
 
         while state.is_running:
             state.audio_ready.acquire()
+            _LOGGER.debug("openwakeword 47")
             if not state.is_running:
                 break
 
@@ -150,6 +151,7 @@ def embeddings_proc(state: State):
 
         while state.is_running:
             state.mels_ready.acquire()
+            _LOGGER.debug("openwakeword 153")
             if not state.is_running:
                 break
 
@@ -269,11 +271,12 @@ def ww_proc(
         ww_state = state.wake_words[ww_model_key]
         while state.is_running:
             ww_state.embeddings_ready.acquire()
+            _LOGGER.debug("openwakeword 272")
             if not state.is_running:
                 break
 
             while True:
-                _LOGGER.debug("openwakeword 272")
+                _LOGGER.debug("openwakeword 277")
                 # only attempt to lock if locks are free
                 if not state.clients_lock.locked() and not state.audio_lock.locked():
                     with state.clients_lock, ww_state.embeddings_lock:
