@@ -62,7 +62,7 @@ def mels_proc(state: State):
                         if batch_size < 1:
                             # Not enough audio to process
                             break
-                        _LOGGER.debug("openwakeword 64")
+                        _LOGGER.debug("openwakeword 64 %d todos" % len(todo_ids))
 
                         audio_tensor = np.zeros(
                             shape=(batch_size, MEL_SAMPLES), dtype=np.float32
@@ -168,7 +168,7 @@ def embeddings_proc(state: State):
                         if batch_size < 1:
                             # Not enough audio to process
                             break
-                        _LOGGER.debug("openwakeword 167")
+                        _LOGGER.debug("openwakeword 167 %d todos" % len(batch_size))
 
                         mels_tensor = np.zeros(
                             shape=(batch_size, EMB_FEATURES, NUM_MELS, 1),
@@ -287,7 +287,7 @@ def ww_proc(
                         if batch_size < 1:
                             # Not enough audio to process
                             break
-                        _LOGGER.debug("openwakeword 284")
+                        _LOGGER.debug("openwakeword 284 %d todos" % len(todo_ids))
 
                         embeddings_tensor = np.zeros(
                             shape=(batch_size, ww_windows, WW_FEATURES),
