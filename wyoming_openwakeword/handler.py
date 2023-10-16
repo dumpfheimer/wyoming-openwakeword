@@ -49,6 +49,7 @@ class OpenWakeWordEventHandler(AsyncEventHandler):
         _LOGGER.debug("Client connected: %s", self.client_id)
 
     async def handle_event(self, event: Event) -> bool:
+        _LOGGER.debug("handle event")
         if Describe.is_type(event.type):
             info = self._get_info()
             await self.write_event(info.event())
